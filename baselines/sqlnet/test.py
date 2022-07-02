@@ -40,13 +40,13 @@ if __name__ == '__main__':
 
     model = SQLNet(word_emb, N_word=N_word, gpu=GPU, trainable_emb = args.train_emb)
 
-    print "Loading from sel model..."
+    print ("Loading from sel model...")
     model.sel_pred.load_state_dict(torch.load("saved_models/sel_models.dump"))
-    print "Loading from sel model..."
+    print ("Loading from sel model...")
     model.cond_pred.load_state_dict(torch.load("saved_models/cond_models.dump"))
-    print "Loading from sel model..."
+    print("Loading from sel model...")
     model.group_pred.load_state_dict(torch.load("saved_models/group_models.dump"))
-    print "Loading from sel model..."
+    print ("Loading from sel model...")
     model.order_pred.load_state_dict(torch.load("saved_models/order_models.dump"))
 
     print_results(model, BATCH_SIZE, test_sql_data, test_table_data, args.output, schemas, TEST_ENTRY)

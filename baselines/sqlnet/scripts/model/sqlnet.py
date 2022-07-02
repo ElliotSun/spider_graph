@@ -6,21 +6,21 @@ import torch.nn as nn
 from collections import defaultdict
 import torch.nn.functional as F
 from torch.autograd import Variable
-from modules.word_embedding import WordEmbedding
-from modules.sel_predict import SelPredictor
-from modules.cond_predict import CondPredictor
-from modules.group_predict import GroupPredictor
-from modules.order_predict import OrderPredictor
-
+from .modules.word_embedding import WordEmbedding
+from .modules.sel_predict import SelPredictor
+from .modules.cond_predict import CondPredictor
+from .modules.group_predict import GroupPredictor
+from .modules.order_predict import OrderPredictor
 
 AGG_OPS = ['none', 'max', 'min', 'count', 'sum', 'avg']
 WHERE_OPS = ['not', 'between', '=', '>', '<', '>=', '<=', '!=', 'in', 'like', 'is', 'exists']
 VALUE = '''"VALUE"'''
 DESC_ASC_LIMIT = ["asc limit 1", "desc limit 1", "asc", "desc"]
 
+
 class SQLNet(nn.Module):
     def __init__(self, word_emb, N_word, N_h=120, N_depth=2,
-            gpu=False, trainable_emb=False):
+                 gpu=False, trainable_emb=False):
         super(SQLNet, self).__init__()
         self.trainable_emb = trainable_emb
 
@@ -31,19 +31,19 @@ class SQLNet(nn.Module):
         self.max_col_num = 45
         self.max_tok_num = 200
         self.SQL_TOK = ['<UNK>', '<END>', 'WHERE', 'AND',
-                'EQL', 'GT', 'LT', '<BEG>']
+                        'EQL', 'GT', 'LT', '<BEG>']
         self.COND_OPS = ['EQL', 'GT', 'LT']
 
         self.embed_layer = WordEmbedding(word_emb, N_word, gpu,
-                self.SQL_TOK, trainable=trainable_emb)
+                                         self.SQL_TOK, trainable=trainable_emb)
 
-        #Predict select clause
+        # Predict select clause
         self.sel_pred = SelPredictor(N_word, N_h, N_depth, gpu)
-        #Predict where condition
+        # Predict where condition
         self.cond_pred = CondPredictor(N_word, N_h, N_depth, gpu)
-        #Predict group by
+        # Predict group by
         self.group_pred = GroupPredictor(N_word, N_h, N_depth, gpu)
-        #Predict order by
+        # Predict order by
         self.order_pred = OrderPredictor(N_word, N_h, N_depth, gpu)
 
         self.CE = nn.CrossEntropyLoss()
@@ -54,9 +54,7 @@ class SQLNet(nn.Module):
         if gpu:
             self.cuda()
 
-
-    def forward(self, q, col, col_num, pred_entry,
-            gt_where = None, gt_cond=None, gt_sel=None):
+    def forward(self, q, col, col_num, pred_entry, gt_where=None, gt_cond=None, gt_sel=None):
         B = len(q)
         pred_agg, pred_sel, pred_cond = pred_entry
 
@@ -76,7 +74,6 @@ class SQLNet(nn.Module):
 
         return (sel_score, cond_score, group_score, order_score)
 
-
     def loss(self, score, truth_num, pred_entry):
         pred_agg, pred_sel, pred_cond = pred_entry
 
@@ -90,7 +87,7 @@ class SQLNet(nn.Module):
         B = len(truth_num)
         loss = 0
 
-        #----------loss for sel_pred -------------#
+        # ----------loss for sel_pred -------------#
 
         # loss for sel agg # and sel agg
         for b in range(len(truth_num)):
@@ -106,16 +103,16 @@ class SQLNet(nn.Module):
                     curr_col_num_aggs += 1
             gt_aggs_num.append(curr_col_num_aggs)
             # print gt_aggs_num
-            data = torch.from_numpy(np.array(gt_aggs_num)) #supposed to be gt # of aggs
+            data = torch.from_numpy(np.array(gt_aggs_num))  # supposed to be gt # of aggs
             if self.gpu:
                 agg_num_truth_var = Variable(data.cuda())
             else:
                 agg_num_truth_var = Variable(data)
-            agg_num_pred = agg_num_score[b, :truth_num[b][5]] # supposed to be gt # of select columns
+            agg_num_pred = agg_num_score[b, :truth_num[b][5]]  # supposed to be gt # of select columns
             loss += (self.CE(agg_num_pred, agg_num_truth_var) \
-                    / len(truth_num))
+                     / len(truth_num))
             # loss for sel agg prediction
-            T = 6 #num agg ops
+            T = 6  # num agg ops
             truth_prob = np.zeros((truth_num[b][5], T), dtype=np.float32)
             gt_agg_by_sel = []
             curr_sel_aggs = []
@@ -137,13 +134,13 @@ class SQLNet(nn.Module):
             else:
                 agg_op_truth_var = Variable(data)
             agg_op_prob = self.sigm(agg_op_score[b, :truth_num[b][5]])
-            agg_bce_loss = -torch.mean( 3*(agg_op_truth_var * \
-                    torch.log(agg_op_prob+1e-10)) + \
-                    (1-agg_op_truth_var) * torch.log(1-agg_op_prob+1e-10) )
+            agg_bce_loss = -torch.mean(3 * (agg_op_truth_var * \
+                                            torch.log(agg_op_prob + 1e-10)) + \
+                                       (1 - agg_op_truth_var) * torch.log(1 - agg_op_prob + 1e-10))
             loss += agg_bce_loss / len(truth_num)
 
-        #Evaluate the number of select columns
-        sel_num_truth = map(lambda x: x[5]-1, truth_num) #might need to be the length of the set of columms
+        # Evaluate the number of select columns
+        sel_num_truth = list(map(lambda x: x[5] - 1, truth_num))  # might need to be the length of the set of columms
         data = torch.from_numpy(np.array(sel_num_truth))
         if self.gpu:
             sel_num_truth_var = Variable(data.cuda())
@@ -161,22 +158,22 @@ class SQLNet(nn.Module):
         else:
             sel_col_truth_var = Variable(data)
         sel_col_prob = self.sigm(sel_col_score)
-        sel_bce_loss = -torch.mean( 3*(sel_col_truth_var * \
-                torch.log(sel_col_prob+1e-10)) + \
-                (1-sel_col_truth_var) * torch.log(1-sel_col_prob+1e-10) )
+        sel_bce_loss = -torch.mean(3 * (sel_col_truth_var * \
+                                        torch.log(sel_col_prob + 1e-10)) + \
+                                   (1 - sel_col_truth_var) * torch.log(1 - sel_col_prob + 1e-10))
         loss += sel_bce_loss
-        #----------------loss for cond_pred--------------------#
-        #cond_num_score, cond_col_score, cond_op_score = cond_score
+        # ----------------loss for cond_pred--------------------#
+        # cond_num_score, cond_col_score, cond_op_score = cond_score
 
-        #Evaluate the number of conditions
-        cond_num_truth = map(lambda x:x[2], truth_num)
+        # Evaluate the number of conditions
+        cond_num_truth = list(map(lambda x: x[2], truth_num))
         data = torch.from_numpy(np.array(cond_num_truth))
         if self.gpu:
             cond_num_truth_var = Variable(data.cuda())
         else:
             cond_num_truth_var = Variable(data)
         loss += self.CE(cond_num_score, cond_num_truth_var)
-        #Evaluate the columns of conditions
+        # Evaluate the columns of conditions
         T = len(cond_col_score[0])
         truth_prob = np.zeros((B, T), dtype=np.float32)
         for b in range(B):
@@ -189,11 +186,11 @@ class SQLNet(nn.Module):
             cond_col_truth_var = Variable(data)
 
         cond_col_prob = self.sigm(cond_col_score)
-        bce_loss = -torch.mean( 3*(cond_col_truth_var * \
-                torch.log(cond_col_prob+1e-10)) + \
-                (1-cond_col_truth_var) * torch.log(1-cond_col_prob+1e-10) )
+        bce_loss = -torch.mean(3 * (cond_col_truth_var * \
+                                    torch.log(cond_col_prob + 1e-10)) + \
+                               (1 - cond_col_truth_var) * torch.log(1 - cond_col_prob + 1e-10))
         loss += bce_loss
-        #Evaluate the operator of conditions
+        # Evaluate the operator of conditions
         for b in range(len(truth_num)):
             if len(truth_num[b][4]) == 0:
                 continue
@@ -206,11 +203,11 @@ class SQLNet(nn.Module):
             # print 'cond_op_truth_var', list(cond_op_truth_var.size())
             # print 'cond_op_pred', list(cond_op_pred.size())
             loss += (self.CE(cond_op_pred, cond_op_truth_var) \
-                    / len(truth_num))
+                     / len(truth_num))
         # -----------loss for group_pred -------------- #
-        #gby_num_score, gby_score, hv_score, hv_col_score, hv_agg_score, hv_op_score = group_score
+        # gby_num_score, gby_score, hv_score, hv_col_score, hv_agg_score, hv_op_score = group_score
         # Evaluate the number of group by columns
-        gby_num_truth = map(lambda x: x[7], truth_num)
+        gby_num_truth = list(map(lambda x: x[7], truth_num))
         data = torch.from_numpy(np.array(gby_num_truth))
         if self.gpu:
             gby_num_truth_var = Variable(data.cuda())
@@ -229,9 +226,9 @@ class SQLNet(nn.Module):
         else:
             gby_col_truth_var = Variable(data)
         gby_col_prob = self.sigm(gby_score)
-        gby_bce_loss = -torch.mean( 3*(gby_col_truth_var * \
-                torch.log(gby_col_prob+1e-10)) + \
-                (1-gby_col_truth_var) * torch.log(1-gby_col_prob+1e-10) )
+        gby_bce_loss = -torch.mean(3 * (gby_col_truth_var * \
+                                        torch.log(gby_col_prob + 1e-10)) + \
+                                   (1 - gby_col_truth_var) * torch.log(1 - gby_col_prob + 1e-10))
         loss += gby_bce_loss
         # Evaluate having
         having_truth = [1 if len(x[13]) == 1 else 0 for x in truth_num]
@@ -253,9 +250,9 @@ class SQLNet(nn.Module):
         else:
             hv_col_truth_var = Variable(data)
         hv_col_prob = self.sigm(hv_col_score)
-        hv_col_bce_loss = -torch.mean( 3*(hv_col_truth_var * \
-                torch.log(hv_col_prob+1e-10)) + \
-                (1-hv_col_truth_var) * torch.log(1-hv_col_prob+1e-10) )
+        hv_col_bce_loss = -torch.mean(3 * (hv_col_truth_var * \
+                                           torch.log(hv_col_prob + 1e-10)) + \
+                                      (1 - hv_col_truth_var) * torch.log(1 - hv_col_prob + 1e-10))
         loss += hv_col_bce_loss
         # Evaluate having agg
         T = len(hv_agg_score[0])
@@ -269,9 +266,9 @@ class SQLNet(nn.Module):
         else:
             hv_agg_truth_var = Variable(data)
         hv_agg_prob = self.sigm(hv_agg_truth_var)
-        hv_agg_bce_loss = -torch.mean( 3*(hv_agg_truth_var * \
-                torch.log(hv_agg_prob+1e-10)) + \
-                (1-hv_agg_truth_var) * torch.log(1-hv_agg_prob+1e-10) )
+        hv_agg_bce_loss = -torch.mean(3 * (hv_agg_truth_var * \
+                                           torch.log(hv_agg_prob + 1e-10)) + \
+                                      (1 - hv_agg_truth_var) * torch.log(1 - hv_agg_prob + 1e-10))
         loss += hv_agg_bce_loss
         # Evaluate having op
         T = len(hv_op_score[0])
@@ -285,16 +282,16 @@ class SQLNet(nn.Module):
         else:
             hv_op_truth_var = Variable(data)
         hv_op_prob = self.sigm(hv_op_truth_var)
-        hv_op_bce_loss = -torch.mean( 3*(hv_op_truth_var * \
-                torch.log(hv_op_prob+1e-10)) + \
-                (1-hv_op_truth_var) * torch.log(1-hv_op_prob+1e-10) )
+        hv_op_bce_loss = -torch.mean(3 * (hv_op_truth_var * \
+                                          torch.log(hv_op_prob + 1e-10)) + \
+                                     (1 - hv_op_truth_var) * torch.log(1 - hv_op_prob + 1e-10))
         loss += hv_op_bce_loss
 
         # -----------loss for order_pred -------------- #
-        #ody_col_score, ody_agg_score, ody_par_score = order_score
+        # ody_col_score, ody_agg_score, ody_par_score = order_score
 
         # Evaluate the number of order by columns
-        ody_num_truth = map(lambda x: x[10], truth_num)
+        ody_num_truth = list(map(lambda x: x[10], truth_num))
         data = torch.from_numpy(np.array(ody_num_truth))
         if self.gpu:
             ody_num_truth_var = Variable(data.cuda())
@@ -313,9 +310,9 @@ class SQLNet(nn.Module):
         else:
             ody_col_truth_var = Variable(data)
         ody_col_prob = self.sigm(ody_col_score)
-        ody_bce_loss = -torch.mean( 3*(ody_col_truth_var * \
-                torch.log(ody_col_prob+1e-10)) + \
-                (1-ody_col_truth_var) * torch.log(1-ody_col_prob+1e-10) )
+        ody_bce_loss = -torch.mean(3 * (ody_col_truth_var * \
+                                        torch.log(ody_col_prob + 1e-10)) + \
+                                   (1 - ody_col_truth_var) * torch.log(1 - ody_col_prob + 1e-10))
         loss += ody_bce_loss
         # Evaluate order agg assume only one
         T = 6
@@ -329,12 +326,12 @@ class SQLNet(nn.Module):
         else:
             ody_agg_truth_var = Variable(data)
         ody_agg_prob = self.sigm(ody_agg_score)
-        ody_agg_bce_loss = -torch.mean( 3*(ody_agg_truth_var * \
-                torch.log(ody_agg_prob+1e-10)) + \
-                (1-ody_agg_truth_var) * torch.log(1-ody_agg_prob+1e-10) )
+        ody_agg_bce_loss = -torch.mean(3 * (ody_agg_truth_var * \
+                                            torch.log(ody_agg_prob + 1e-10)) + \
+                                       (1 - ody_agg_truth_var) * torch.log(1 - ody_agg_prob + 1e-10))
         loss += ody_agg_bce_loss
         # Evaluate parity
-        ody_par_truth = map(lambda x: x[11], truth_num)
+        ody_par_truth = list(map(lambda x: x[11], truth_num))
         data = torch.from_numpy(np.array(ody_par_truth))
         if self.gpu:
             ody_par_truth_var = Variable(data.cuda())
@@ -343,19 +340,18 @@ class SQLNet(nn.Module):
         loss += self.CE(ody_par_score, ody_par_truth_var)
         return loss
 
-
     def check_acc(self, vis_info, pred_queries, gt_queries, pred_entry, error_print=False):
         def pretty_print(vis_data, pred_query, gt_query):
-            print "\n----------detailed error prints-----------"
+            print("\n----------detailed error prints-----------")
             try:
-                print 'question: ', vis_data[0]
-                print 'question_tok: ', vis_data[3]
-                print 'headers: (%s)'%(' || '.join(vis_data[1]))
-                print 'query:', vis_data[2]
-                print "target query: ", gt_query
-                print "pred query: ", pred_query
+                print('question: ', vis_data[0])
+                print('question_tok: ', vis_data[3])
+                print('headers: (%s)' % (' || '.join(vis_data[1])))
+                print('query:', vis_data[2])
+                print("target query: ", gt_query)
+                print("pred query: ", pred_query)
             except:
-                print "\n------skipping print: decoding problem ----------------------"
+                print("\n------skipping print: decoding problem ----------------------")
 
         def gen_cond_str(conds, header):
             if len(conds) == 0:
@@ -363,7 +359,7 @@ class SQLNet(nn.Module):
             cond_str = []
             for cond in conds:
                 cond_str.append(header[cond[0]] + ' ' +
-                    self.COND_OPS[cond[1]] + ' ' + unicode(cond[2]).lower())
+                                self.COND_OPS[cond[1]] + ' ' + cond[2].lower())
             return 'WHERE ' + ' AND '.join(cond_str)
 
         pred_agg, pred_sel, pred_cond = pred_entry
@@ -415,7 +411,7 @@ class SQLNet(nn.Module):
                 agg_num_err += 1
                 sel_flag = False
 
-            if sorted(pred_qry['agg']) != sorted(gt_qry['agg']): # naive
+            if sorted(pred_qry['agg']) != sorted(gt_qry['agg']):  # naive
                 agg_op_err += 1
                 sel_flag = False
 
@@ -514,16 +510,19 @@ class SQLNet(nn.Module):
 
         return np.array((sel_err, cond_err, gby_err, ody_err)), tot_err
 
-
     def gen_query(self, score, q, col, raw_q, raw_col, pred_entry, verbose=False):
         pred_agg, pred_sel, pred_cond = pred_entry
 
         sel_score, cond_score, group_score, order_score = score
 
-        sel_num_score, sel_col_score, agg_num_score, agg_op_score = [x.data.cpu().numpy() if x is not None else None for x in sel_score]
-        cond_num_score, cond_col_score, cond_op_score = [x.data.cpu().numpy() if x is not None else None for x in cond_score]
-        gby_num_score, gby_score, hv_score, hv_col_score, hv_agg_score, hv_op_score = [x.data.cpu().numpy() if x is not None else None for x in group_score]
-        ody_num_score, ody_col_score, ody_agg_score, ody_par_score = [x.data.cpu().numpy() if x is not None else None for x in order_score]
+        sel_num_score, sel_col_score, agg_num_score, agg_op_score = [x.data.cpu().numpy() if x is not None else None for
+                                                                     x in sel_score]
+        cond_num_score, cond_col_score, cond_op_score = [x.data.cpu().numpy() if x is not None else None for x in
+                                                         cond_score]
+        gby_num_score, gby_score, hv_score, hv_col_score, hv_agg_score, hv_op_score = [
+            x.data.cpu().numpy() if x is not None else None for x in group_score]
+        ody_num_score, ody_col_score, ody_agg_score, ody_par_score = [x.data.cpu().numpy() if x is not None else None
+                                                                      for x in order_score]
 
         ret_queries = []
         B = len(sel_num_score)
@@ -546,7 +545,7 @@ class SQLNet(nn.Module):
                 agg_preds += curr_agg_ops
             cur_query['agg_num'] = agg_nums
             cur_query['agg'] = agg_preds
-            #----------get group by predict
+            # ----------get group by predict
             gby_num_cols = np.argmax(gby_num_score[b])
             cur_query['gby_num'] = gby_num_cols
             cur_query['group'] = np.argsort(-gby_score[b])[:gby_num_cols]
@@ -578,8 +577,8 @@ class SQLNet(nn.Module):
             #
             # cur_query['ody_agg'] = ody_agg_preds
             # cur_query['parity'] = np.argmax(ody_par_score[b]) - 1
-            #---------get cond predict
-            #cond_num_score, cond_col_score, cond_op_score = [x.data.cpu().numpy() if x is not None else None for x in cond_score]
+            # ---------get cond predict
+            # cond_num_score, cond_col_score, cond_op_score = [x.data.cpu().numpy() if x is not None else None for x in cond_score]
             cur_query['conds'] = []
             cond_num = np.argmax(cond_num_score[b])
             max_idxes = np.argsort(-cond_col_score[b])[:cond_num]
@@ -592,7 +591,6 @@ class SQLNet(nn.Module):
 
         return ret_queries
 
-
     def find_shortest_path(self, start, end, graph):
         stack = [[start, []]]
         visited = set()
@@ -604,8 +602,7 @@ class SQLNet(nn.Module):
                 if node[0] not in visited:
                     stack.append((node[0], history + [(node[0], node[1])]))
                     visited.add(node[0])
-        #print("Could not find a path between table {} and table {}".format(start, end))
-
+        # print("Could not find a path between table {} and table {}".format(start, end))
 
     def gen_from(self, candidate_tables, schema):
         if len(candidate_tables) <= 1:
@@ -665,15 +662,18 @@ class SQLNet(nn.Module):
             return table_alias_dict, ret
         return table_alias_dict, ret
 
-
     def gen_sql(self, score, col_org, schema_seq):
 
         sel_score, cond_score, group_score, order_score = score
 
-        sel_num_score, sel_col_score, agg_num_score, agg_op_score = [x.data.cpu().numpy() if x is not None else None for x in sel_score]
-        cond_num_score, cond_col_score, cond_op_score = [x.data.cpu().numpy() if x is not None else None for x in cond_score]
-        gby_num_score, gby_score, hv_score, hv_col_score, hv_agg_score, hv_op_score = [x.data.cpu().numpy() if x is not None else None for x in group_score]
-        ody_num_score, ody_col_score, ody_agg_score, ody_par_score = [x.data.cpu().numpy() if x is not None else None for x in order_score]
+        sel_num_score, sel_col_score, agg_num_score, agg_op_score = [x.data.cpu().numpy() if x is not None else None for
+                                                                     x in sel_score]
+        cond_num_score, cond_col_score, cond_op_score = [x.data.cpu().numpy() if x is not None else None for x in
+                                                         cond_score]
+        gby_num_score, gby_score, hv_score, hv_col_score, hv_agg_score, hv_op_score = [
+            x.data.cpu().numpy() if x is not None else None for x in group_score]
+        ody_num_score, ody_col_score, ody_agg_score, ody_par_score = [x.data.cpu().numpy() if x is not None else None
+                                                                      for x in order_score]
 
         ret_queries = []
         ret_sqls = []
@@ -683,7 +683,7 @@ class SQLNet(nn.Module):
             cur_cols = col_org[b]
             cur_query = {}
             schema = schema_seq[b]
-            #for generate sql
+            # for generate sql
             cur_sql = []
             cur_sel = []
             cur_conds = []
@@ -712,7 +712,6 @@ class SQLNet(nn.Module):
             cur_query['agg'] = agg_preds
             # for gen sel
 
-
             cur_sel.append("select")
             for i, cid in enumerate(cur_query['sel']):
                 aggs = agg_preds_gen[i]
@@ -730,11 +729,10 @@ class SQLNet(nn.Module):
                     if j < agg_num - 1:
                         cur_sel.append(",")
 
-                if i < sel_num_cols-1:
+                if i < sel_num_cols - 1:
                     cur_sel.append(",")
 
-
-            #----------get group by predict
+            # ----------get group by predict
             gby_num_cols = np.argmax(gby_num_score[b])
             cur_query['gby_num'] = gby_num_cols
             cur_query['group'] = np.argsort(-gby_score[b])[:gby_num_cols]
@@ -755,7 +753,7 @@ class SQLNet(nn.Module):
                 for i, gid in enumerate(cur_query['group']):
                     cur_group.append([gid, cur_cols[gid][1]])
                     cur_tables[cur_cols[gid][0]].append([gid, cur_cols[gid][1]])
-                    if i < gby_num_cols-1:
+                    if i < gby_num_cols - 1:
                         cur_group.append(",")
                 if cur_query['hv'] != 0:
                     cur_group.append("having")
@@ -766,7 +764,8 @@ class SQLNet(nn.Module):
                         cur_group.append(")")
                     else:
                         cur_group.append([cur_query['hv_col'], cur_cols[cur_query['hv_col']][1]])
-                    cur_tables[cur_cols[cur_query['hv_col']][0]].append([cur_query['hv_col'],cur_cols[cur_query['hv_col']][1]])
+                    cur_tables[cur_cols[cur_query['hv_col']][0]].append(
+                        [cur_query['hv_col'], cur_cols[cur_query['hv_col']][1]])
                     cur_group.append(WHERE_OPS[cur_query['hv_op']])
                     cur_group.append(VALUE)
 
@@ -804,8 +803,8 @@ class SQLNet(nn.Module):
                 elif datid == 3:
                     cur_order.append(DESC_ASC_LIMIT[3])
 
-            #---------get cond predict
-            #cond_num_score, cond_col_score, cond_op_score = [x.data.cpu().numpy() if x is not None else None for x in cond_score]
+            # ---------get cond predict
+            # cond_num_score, cond_col_score, cond_op_score = [x.data.cpu().numpy() if x is not None else None for x in cond_score]
             cur_query['conds'] = []
             cond_num = np.argmax(cond_num_score[b])
             max_idxes = np.argsort(-cond_col_score[b])[:cond_num]
@@ -825,9 +824,8 @@ class SQLNet(nn.Module):
                     cur_tables[cur_cols[cid][0]].append([cid, cur_cols[cid][1]])
                     cur_conds.append(WHERE_OPS[oid])
                     cur_conds.append(VALUE)
-                    if i < cond_num-1:
+                    if i < cond_num - 1:
                         cur_conds.append("and")
-
 
             if -1 in cur_tables.keys():
                 del cur_tables[-1]
@@ -879,15 +877,15 @@ class SQLNet(nn.Module):
                     else:
                         new_order.append(s)
 
-                            # for gen all sql
+                        # for gen all sql
                 cur_sql = new_sel + [ret] + new_conds + new_group + new_order
             else:
                 cur_sql = []
-                #try:
+                # try:
                 cur_sql.extend([s[1] if isinstance(s, list) else s for s in cur_sel])
                 if len(cur_tables.keys()) == 0:
                     cur_tables[0] = []
-                cur_sql.extend(["from", schema["table_names_original"][cur_tables.keys()[0]]])
+                cur_sql.extend(["from", schema["table_names_original"][list(cur_tables.keys())[0]]])
                 if len(cur_conds) > 0:
                     cur_sql.extend([s[1] if isinstance(s, list) else s for s in cur_conds])
                 if len(cur_group) > 0:

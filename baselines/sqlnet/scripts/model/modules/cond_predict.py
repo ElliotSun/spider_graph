@@ -4,7 +4,7 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from net_utils import run_lstm, col_name_encode
+from .net_utils import run_lstm, col_name_encode
 
 
 class CondPredictor(nn.Module):
@@ -13,13 +13,9 @@ class CondPredictor(nn.Module):
         self.N_h = N_h
         self.gpu = gpu
 
-        self.q_lstm = nn.LSTM(input_size=N_word, hidden_size=N_h/2,
-                num_layers=N_depth, batch_first=True,
-                dropout=0.3, bidirectional=True)
+        self.q_lstm = nn.LSTM(input_size=N_word, hidden_size=N_h//2, num_layers=N_depth, batch_first=True, dropout=0.3, bidirectional=True)
 
-        self.col_lstm = nn.LSTM(input_size=N_word, hidden_size=N_h/2,
-                num_layers=N_depth, batch_first=True,
-                dropout=0.3, bidirectional=True)
+        self.col_lstm = nn.LSTM(input_size=N_word, hidden_size=N_h//2, num_layers=N_depth, batch_first=True, dropout=0.3, bidirectional=True)
 
         self.q_num_att = nn.Linear(N_h, N_h)
         self.col_num_out_q = nn.Linear(N_h, N_h)
